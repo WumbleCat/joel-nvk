@@ -1,0 +1,8 @@
+# Production runs: quiet logs, full data, full parallelism.
+
+logging:
+  level: WARNING
+
+run:
+  batch_size: 64
+  num_workers: 8

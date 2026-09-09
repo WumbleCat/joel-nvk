@@ -1,0 +1,16 @@
+# Base configuration. dev.yaml and production.yaml are merged over this file.
+
+project:
+  name: joel-nvk
+  seed: 42
+
+paths:
+  data: data
+  outputs: outputs
+
+logging:
+  level: INFO
+
+run:
+  batch_size: 32
+  num_workers: 4
