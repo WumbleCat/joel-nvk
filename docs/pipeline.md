@@ -59,6 +59,33 @@ Re-run a single stage against an existing run:
 uv run scripts/run_pipeline.py --env smoke --stages kl --run-id pipeline-Qwen2.5-0.5B-Instruct-s42-...
 ```
 
+### From PowerShell
+
+`scripts/run_pipeline.ps1` wraps the same entry point with a switch per stage, so
+you do not have to remember the stage names:
+
+```powershell
+.\scriptsun_pipeline.ps1 -All -LowMemory -Summarize     # everything, then the tables
+.\scriptsun_pipeline.ps1 -Env pilot -All -Summarize      # the pilot sizes
+.\scriptsun_pipeline.ps1 -Baseline -EvalMath             # just those two stages
+.\scriptsun_pipeline.ps1 -Kl -RunId run-smoke-20260909-191305   # re-probe an existing run
+```
+
+| Flag | Effect |
+| --- | --- |
+| `-All` | Every stage, in pipeline order |
+| `-Prepare` `-Baseline` `-TrainMath` `-EvalMath` `-TrainMmlu` `-EvalMmlu` `-Kl` | Pick stages; they still run in pipeline order, not the order typed |
+| `-Env <name>` | Config to load (`smoke`, `pilot`, `default`, `dev`, `production`) |
+| `-RunId <id>` | Reuse an existing run's adapters and results file |
+| `-Seed <n>` | Override the config seed |
+| `-LowMemory` | One process per stage, so memory is released between them |
+| `-Summarize` | Print the accuracy / forgetting / KL tables at the end |
+| `-NoNativeTls` | Skip `UV_NATIVE_TLS=1` (set by default; this network inspects TLS) |
+
+`-LowMemory` matters on a machine that cannot hold the model alongside everything
+else — a single process accumulates the model, the datasets and the KL tensors
+across stages, and gets killed.
+
 The first run downloads the model (~1 GB for Qwen2.5-0.5B-Instruct) and the two
 datasets; both are cached by Hugging Face afterwards. `smoke` runs on CPU in a
 few minutes; `pilot` wants a GPU.
