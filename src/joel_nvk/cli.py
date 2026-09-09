@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="joel-nvk", description="joel-nvk command line interface"
-    )
+    parser = argparse.ArgumentParser(prog="joel-nvk", description="joel-nvk command line interface")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--env", default="default", help="Config in configs/ to load (default: default)"
