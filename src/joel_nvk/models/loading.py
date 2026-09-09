@@ -63,8 +63,12 @@ def load_base_model(model_id: str, *, device: str = "auto", dtype: str = "auto")
 
     # transformers >=5 renamed torch_dtype to dtype. The annotation keeps mypy off
     # the decorated `.to`, whose stub expects an unbound PreTrainedModel.
-    model: Any = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch_dtype)
-    model.to(device)
+    # device_map places weights on the target device as they are read, instead
+    # of materialising the whole model in system RAM first and moving it — on a
+    # RAM-starved machine that transient copy is what gets the process killed.
+    model: Any = AutoModelForCausalLM.from_pretrained(
+        model_id, dtype=torch_dtype, device_map=device
+    )
     model.eval()
     return model
 
