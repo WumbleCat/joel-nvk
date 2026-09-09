@@ -8,6 +8,19 @@ from joel_nvk.utils.console import use_utf8_output
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 
+# At DEBUG these libraries emit a line per socket, lock and file handle, which
+# buries our own output. They are pinned to WARNING unless something is wrong.
+NOISY_LOGGERS = (
+    "httpcore",
+    "httpx",
+    "urllib3",
+    "filelock",
+    "fsspec",
+    "datasets",
+    "huggingface_hub",
+    "matplotlib",
+)
+
 
 def setup_logging(level: str = "INFO", log_file: Path | None = None) -> None:
     """Configure the root logger to write to stderr and, optionally, a file."""
@@ -23,3 +36,5 @@ def setup_logging(level: str = "INFO", log_file: Path | None = None) -> None:
         handlers=handlers,
         force=True,
     )
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

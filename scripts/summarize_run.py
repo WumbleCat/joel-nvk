@@ -9,6 +9,7 @@ import argparse
 
 from joel_nvk.core.report import format_summary, load_records, summarise
 from joel_nvk.utils.console import use_utf8_output
+from joel_nvk.utils.net import use_system_certs
 from joel_nvk.utils.paths import outputs_dir
 
 
@@ -33,6 +34,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     use_utf8_output()
+    use_system_certs()
     args = parse_args()
     if not args.run_id and not args.latest:
         raise SystemExit("Give a run_id or pass --latest")
