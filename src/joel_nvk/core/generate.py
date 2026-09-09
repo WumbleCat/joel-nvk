@@ -6,6 +6,7 @@ sampling noise.
 """
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,9 @@ def generate(
     )
 
     results: list[dict[str, Any]] = []
-    for start in range(0, len(prompts), batch_size):
+    started = time.monotonic()
+    n_batches = -(-len(prompts) // batch_size)
+    for batch_index, start in enumerate(range(0, len(prompts), batch_size), start=1):
         batch = prompts[start : start + batch_size]
         encoded = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=False)
         encoded = {key: value.to(device) for key, value in encoded.items()}
@@ -73,6 +76,17 @@ def generate(
                     "text": tokenizer.decode(ids, skip_special_tokens=True),
                 }
             )
-        logger.debug("Generated %d/%d", len(results), len(prompts))
+        elapsed = time.monotonic() - started
+        tokens = sum(len(r["token_ids"]) for r in results)
+        logger.info(
+            "generated %d/%d prompts (batch %d/%d, %.0f tokens, %.1f tok/s, %.0fs elapsed)",
+            len(results),
+            len(prompts),
+            batch_index,
+            n_batches,
+            tokens,
+            tokens / elapsed if elapsed else 0.0,
+            elapsed,
+        )
 
     return results
