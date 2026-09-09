@@ -1,4 +1,5 @@
-# Base configuration. dev.yaml and production.yaml are merged over this file.
+# Base configuration. dev.yaml, smoke.yaml, pilot.yaml and production.yaml are
+# merged over this file. Every key lives here with a working default.
 
 project:
   name: joel-nvk
@@ -11,6 +12,81 @@ paths:
 logging:
   level: INFO
 
-run:
-  batch_size: 32
-  num_workers: 4
+model:
+  id: Qwen/Qwen2.5-0.5B-Instruct
+  device: auto            # auto | cuda | cpu
+  dtype: auto             # auto -> bf16 on GPU, fp32 on CPU
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+data:
+  math:
+    dataset: EleutherAI/hendrycks_math
+    subjects:
+      - algebra
+      - counting_and_probability
+      - geometry
+      - intermediate_algebra
+      - number_theory
+      - prealgebra
+      - precalculus
+    train_split: train
+    eval_split: test
+    train_size: 512
+    eval_levels: [3, 4, 5]   # the forgetting measurement lives here
+    eval_size: 200
+  mmlu:
+    dataset: cais/mmlu
+    config: all
+    train_split: auxiliary_train
+    eval_split: test
+    train_size: 512
+    eval_size: 200
+
+train:
+  math:
+    epochs: 1
+    max_steps: -1
+    lr: 1.0e-4
+    batch_size: 4
+    grad_accum: 4
+    max_length: 1024
+    scheduler: cosine
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 10
+  mmlu:
+    epochs: 1
+    max_steps: -1
+    lr: 1.0e-4
+    batch_size: 8
+    grad_accum: 2
+    max_length: 512
+    scheduler: cosine
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 10
+
+eval:
+  math_max_new_tokens: 512
+  mmlu_max_new_tokens: 8
+  batch_size: 8
+
+kl:
+  probe_size: 32            # prompts per axis
+  max_new_tokens: 128       # continuation length scored under every state
+  generate_batch_size: 4
+  batch_size: 1             # full-vocab log-probs for 3 states dominate memory

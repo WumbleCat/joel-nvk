@@ -1,0 +1,36 @@
+# Smallest run that still exercises every stage: does the pipeline work at all?
+# Numbers from this config mean nothing — the sample sizes are far too small.
+# Runs on CPU in a few minutes; on a GPU, in well under one.
+
+logging:
+  level: DEBUG
+
+data:
+  math:
+    train_size: 16
+    eval_size: 8
+  mmlu:
+    train_size: 16
+    eval_size: 8
+
+train:
+  math:
+    max_steps: 4
+    batch_size: 1
+    grad_accum: 1
+    max_length: 512
+  mmlu:
+    max_steps: 4
+    batch_size: 1
+    grad_accum: 1
+    max_length: 512
+
+eval:
+  math_max_new_tokens: 128
+  batch_size: 2
+
+kl:
+  probe_size: 4
+  max_new_tokens: 32
+  generate_batch_size: 2
+  batch_size: 1

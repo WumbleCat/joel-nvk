@@ -1,0 +1,27 @@
+# A first real pass: big enough for the accuracies to mean something, still one
+# seed and one drift point, so it cannot support a claim about methods.
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+
+data:
+  math:
+    train_size: 2000
+    eval_size: 500
+  mmlu:
+    train_size: 2000
+    eval_size: 500
+
+train:
+  math:
+    epochs: 2
+    batch_size: 4
+    grad_accum: 8
+  mmlu:
+    epochs: 1
+    batch_size: 8
+    grad_accum: 4
+
+kl:
+  probe_size: 128
+  max_new_tokens: 256
