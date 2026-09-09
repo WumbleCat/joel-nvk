@@ -1,0 +1,109 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+.env.*
+!.env.example
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# Agent skills / local agent config
+.agents/
+agents/skills/
+agent_skills/
+skills/
+!.claude/skills/
+
+# Other common AI agent configs
+.cursor/
+.cursorrules
+.windsurf/
+.codex/
+
+# =========================
+# ML / experiment outputs
+# =========================
+/runs/
+/results/
+/checkpoints/
+/logs/
+wandb/
+mlruns/
+
+# outputs/ contents are ignored, but the directory skeleton is tracked
+/outputs/*
+!/outputs/logs/
+!/outputs/figures/
+!/outputs/results/
+/outputs/*/*
+!/outputs/*/.gitkeep
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+
+# =========================
+# Data
+# =========================
+data/raw/
+data/processed/
+datasets/
+
+# =========================
+# Cache
+# =========================
+.cache/
+.cache/*
+huggingface/
+hf_cache/
+
+# =========================
+# Build / packaging
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Testing / coverage
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Temporary files
+# =========================
+tmp/
+temp/
+*.tmp
+*.log
