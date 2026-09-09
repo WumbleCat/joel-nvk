@@ -93,6 +93,24 @@ jobs that do not need the tooling use `uv sync --no-dev`.
 Mark slow tests with `@pytest.mark.slow` and skip them locally with
 `uv run pytest -m "not slow"`.
 
+## GPU
+
+`uv sync --group ml` installs the CUDA 12.6 build of torch on Windows and Linux
+(from PyTorch's own index — PyPI's Windows wheel is CPU-only). Check it took:
+
+```bash
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+A driver older than the CUDA build refuses to load it (`nvidia-smi` shows the
+newest CUDA the driver supports); on such a machine change the index in
+`pyproject.toml` (`pytorch-cu126` → an older `cuXXX`) and `uv lock`. On macOS
+there is no CUDA build and the PyPI wheel is used as is.
+
+Run stages on CPU only for tiny sanity checks: an unmerged LoRA on fp32 CPU
+decodes at ~1 token/s on this laptop, which makes even the smoke config take
+hours.
+
 ## Troubleshooting
 
 **`invalid peer certificate: UnknownIssuer` when uv fetches packages.** Something
@@ -107,6 +125,16 @@ export UV_NATIVE_TLS=1     # Windows PowerShell: $env:UV_NATIVE_TLS = "1"
 
 Setting the environment variable once per shell (or in your profile) makes every
 later `uv` command work without the flag. This machine needs it.
+
+**`There is not enough space on the disk` while installing torch.** uv unpacks
+wheels in its cache under `%LOCALAPPDATA%\uv\cache` on C:, and the CUDA torch
+wheel is 2.4 GB compressed. Point the cache at a drive with room — a
+project-local directory works and is gitignored:
+
+```powershell
+$env:UV_CACHE_DIR = "E:\sourcecode\joel-nvk\.uv-cache"   # per shell, or in your profile
+uv sync --group ml
+```
 
 **`VIRTUAL_ENV=... does not match the project environment path`.** A different
 virtualenv is active in the shell; uv ignores it and uses `.venv` anyway, which is

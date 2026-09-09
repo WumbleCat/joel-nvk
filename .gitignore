@@ -107,3 +107,6 @@ tmp/
 temp/
 *.tmp
 *.log
+
+# Local uv cache (C: is full; see docs/development.md)
+.uv-cache/
