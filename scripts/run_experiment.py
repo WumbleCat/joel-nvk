@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Run one experiment and write its artefacts under ``outputs/``.
 
-    uv run scripts/run_experiment.py --env dev --name baseline
+uv run scripts/run_experiment.py --env dev --name baseline
 """
 
 import argparse
@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 
 from joel_nvk.utils import load_config, outputs_dir, setup_logging
+from joel_nvk.utils.console import use_utf8_output
 
 logger = logging.getLogger("run_experiment")
 
@@ -22,6 +23,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    use_utf8_output()
     args = parse_args()
     config = load_config(args.env)
 

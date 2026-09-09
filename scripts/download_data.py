@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 """Fetch the raw datasets this project depends on into ``data/raw/``.
 
-    uv run scripts/download_data.py
+uv run scripts/download_data.py
 """
 
 import argparse
 import logging
 
 from joel_nvk.utils import data_dir, setup_logging
+from joel_nvk.utils.console import use_utf8_output
 
 logger = logging.getLogger("download_data")
 
@@ -22,6 +23,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    use_utf8_output()
     args = parse_args()
     setup_logging()
 

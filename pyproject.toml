@@ -15,6 +15,17 @@ dependencies = [
 ]
 
 [dependency-groups]
+# The heavy ML stack. Not installed by default — `uv sync --group ml` when you
+# need to run the pipeline, so a docs-only checkout stays small.
+ml = [
+    "torch>=2.4",
+    "transformers>=4.44",
+    "peft>=0.13",
+    "datasets>=3.0",
+    "accelerate>=0.34",
+    "safetensors>=0.4",
+]
+
 # Installed by `uv sync` (the default group). Skip with `uv sync --no-dev`.
 dev = [
     "pytest>=8.0",
@@ -33,6 +44,8 @@ packages = ["src/joel_nvk"]
 [tool.uv]
 # Keep the project itself editable so `uv run` picks up src/ edits without reinstalling.
 package = true
+# `ml` is opt-in: uv sync --group ml
+default-groups = ["dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
