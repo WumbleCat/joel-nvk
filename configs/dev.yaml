@@ -1,0 +1,9 @@
+# Local development: loud logs, small runs, single worker for easy debugging.
+
+logging:
+  level: DEBUG
+
+run:
+  batch_size: 8
+  num_workers: 0
+  limit_samples: 100
