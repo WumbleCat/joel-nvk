@@ -17,6 +17,16 @@ The same thing as a module, if you prefer:
 uv run python -m joel_nvk.cli config
 ```
 
+## The forgetting pipeline
+
+The MATH -> MMLU run, in full, is described in [pipeline.md](pipeline.md):
+
+```bash
+uv sync --group ml                              # one-off: torch, transformers, peft, datasets
+uv run scripts/run_pipeline.py --env smoke      # every stage, tiny sizes
+uv run scripts/summarize_run.py --latest        # accuracy / forgetting / KL tables
+```
+
 ## Scripts
 
 ```bash
