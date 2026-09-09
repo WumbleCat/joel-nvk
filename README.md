@@ -48,6 +48,13 @@ uv run scripts/run_pipeline.py --env smoke        # every stage, tiny sizes
 uv run scripts/summarize_run.py --latest          # accuracy / forgetting / KL tables
 ```
 
+From PowerShell, with a switch per stage:
+
+```powershell
+.\scripts
+un_pipeline.ps1 -All -LowMemory -Summarize
+```
+
 ## Repository structure
 
 ```
@@ -82,6 +89,7 @@ joel-nvk/
 ├── scripts/                     thin CLI wrappers; no logic worth testing
 │   ├── setup.sh                 install uv, sync the env, seed .env
 │   ├── run_pipeline.py          the MATH -> MMLU forgetting run
+│   ├── run_pipeline.ps1         the same run, with PowerShell switches
 │   ├── summarize_run.py         accuracy / forgetting / KL tables for a run
 │   ├── run_experiment.py        generic single-run entry point
 │   └── download_data.py         populate data/raw/
@@ -138,6 +146,8 @@ automatically; they are also worth reading directly.
 
 | Skill | Covers |
 | --- | --- |
+| [changing-the-code](.claude/skills/changing-the-code/SKILL.md) | Working when the task is to modify the repo: the gate, scope, what invalidates results |
+| [answering-questions](.claude/skills/answering-questions/SKILL.md) | Working when the task is to explain code or results: read-only, cite the artefact |
 | [repo-standards](.claude/skills/repo-standards/SKILL.md) | Where code goes, configs, paths, naming, running via `uv run` |
 | [experiment-design](.claude/skills/experiment-design/SKILL.md) | The three hypotheses, the four arms, the KL ladder, confounds |
 | [training-pipeline](.claude/skills/training-pipeline/SKILL.md) | Shared trainer contract, on-policy data generation, checkpointing |
