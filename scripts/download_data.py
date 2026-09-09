@@ -9,6 +9,7 @@ import logging
 
 from joel_nvk.utils import data_dir, setup_logging
 from joel_nvk.utils.console import use_utf8_output
+from joel_nvk.utils.net import use_system_certs
 
 logger = logging.getLogger("download_data")
 
@@ -24,6 +25,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     use_utf8_output()
+    use_system_certs()
     args = parse_args()
     setup_logging()
 

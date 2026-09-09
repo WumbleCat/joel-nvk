@@ -24,23 +24,30 @@ from joel_nvk.models.loading import adapter_state
 logger = logging.getLogger(__name__)
 
 
-def _batch_logprobs(model: Any, input_ids: Any, attention_mask: Any) -> Any:
-    """Log-softmax over the vocabulary, in float32, for the given batch."""
+def _batch_logprobs(model: Any, input_ids: Any, attention_mask: Any, gather_at: Any) -> Any:
+    """Log-softmax over the vocabulary at the scored positions only.
+
+    KL is only ever read at continuation positions, and the prompt is usually the
+    long part of the sequence — a MATH prompt runs several hundred tokens against
+    a continuation of a few dozen. Slicing before the softmax keeps the resident
+    tensor proportional to the continuation, not the whole sequence, which is the
+    difference between a few hundred MB and a few GB per state.
+    """
     import torch
 
     with torch.no_grad():
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
-    return torch.log_softmax(logits[:, :-1, :].float(), dim=-1)
+    # Position j-1 predicts token j, so the scored logits sit one step earlier.
+    index = gather_at.unsqueeze(-1).expand(-1, -1, logits.shape[-1])
+    scored = torch.gather(logits, 1, index)
+    return torch.log_softmax(scored.float(), dim=-1)
 
 
-def _pair_kl(logp_policy: Any, logp_reference: Any, selected: Any) -> Any:
-    """Per-sequence mean KL(policy || reference) over the selected positions."""
-    import torch
-
-    pointwise = torch.exp(logp_policy) * (logp_policy - logp_reference)
-    per_token = pointwise.sum(dim=-1)  # [B, T-1]
-    per_token = per_token * selected
-    counts = selected.sum(dim=-1).clamp(min=1)
+def _pair_kl(logp_policy: Any, logp_reference: Any, valid: Any) -> Any:
+    """Per-sequence mean KL(policy || reference) over the valid scored positions."""
+    pointwise = logp_policy.exp() * (logp_policy - logp_reference)
+    per_token = pointwise.sum(dim=-1) * valid
+    counts = valid.sum(dim=-1).clamp(min=1)
     return per_token.sum(dim=-1) / counts
 
 
@@ -80,28 +87,35 @@ def kl_between_states(
         sequences = [item["prompt_ids"] + item["continuation_ids"] for item in batch]
         width = max(len(seq) for seq in sequences)
 
+        longest_continuation = max(len(item["continuation_ids"]) for item in batch)
+
         input_ids = torch.full((len(batch), width), pad_id, dtype=torch.long)
         attention = torch.zeros((len(batch), width), dtype=torch.long)
-        # True at positions holding a continuation token.
-        is_continuation = torch.zeros((len(batch), width), dtype=torch.bool)
+        # For each row, the logit positions that predict its continuation tokens.
+        gather_at = torch.zeros((len(batch), longest_continuation), dtype=torch.long)
+        valid = torch.zeros((len(batch), longest_continuation), dtype=torch.float)
+
         for row, (item, seq) in enumerate(zip(batch, sequences, strict=True)):
+            n_prompt = len(item["prompt_ids"])
+            n_cont = len(item["continuation_ids"])
             input_ids[row, : len(seq)] = torch.tensor(seq, dtype=torch.long)
             attention[row, : len(seq)] = 1
-            is_continuation[row, len(item["prompt_ids"]) : len(seq)] = True
+            gather_at[row, :n_cont] = torch.arange(n_prompt - 1, n_prompt + n_cont - 1)
+            valid[row, :n_cont] = 1.0
 
         input_ids = input_ids.to(device)
         attention = attention.to(device)
-        # Position j-1 predicts token j, so drop the first column to align.
-        selected = is_continuation[:, 1:].to(device).float()
-        total_tokens += int(selected.sum().item())
+        gather_at = gather_at.to(device)
+        valid = valid.to(device)
+        total_tokens += int(valid.sum().item())
 
         logprobs = {}
         for state in states:
             with adapter_state(model, state):
-                logprobs[state] = _batch_logprobs(model, input_ids, attention)
+                logprobs[state] = _batch_logprobs(model, input_ids, attention, gather_at)
 
         for policy, reference in pairs:
-            values = _pair_kl(logprobs[policy], logprobs[reference], selected)
+            values = _pair_kl(logprobs[policy], logprobs[reference], valid)
             per_prompt[(policy, reference)].extend(float(v) for v in values.cpu())
 
         del logprobs

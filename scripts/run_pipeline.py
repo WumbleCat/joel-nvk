@@ -11,9 +11,10 @@ Stages: prepare, baseline, train_math, eval_math, train_mmlu, eval_mmlu, kl.
 import argparse
 import logging
 
-from joel_nvk.core.pipeline import STAGES, run_pipeline
+from joel_nvk.core.pipeline import STAGES, make_run_id, run_pipeline
 from joel_nvk.utils import load_config, outputs_dir, setup_logging
 from joel_nvk.utils.console import use_utf8_output
+from joel_nvk.utils.net import use_system_certs
 
 logger = logging.getLogger("run_pipeline")
 
@@ -41,17 +42,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     use_utf8_output()
+    use_system_certs()
     args = parse_args()
     config = load_config(args.env)
     if args.seed is not None:
         config["project"]["seed"] = args.seed
 
-    setup_logging(
-        config["logging"]["level"],
-        log_file=outputs_dir() / "logs" / f"pipeline-{args.env}.log",
-    )
+    # One log per run, so a run's history stays readable after the fact:
+    #   Get-Content outputs\logs\<run_id>.log -Wait -Tail 20   (PowerShell)
+    #   tail -f outputs/logs/<run_id>.log                       (bash)
+    run_id = args.run_id or make_run_id(config, int(config["project"]["seed"]))
+    setup_logging(config["logging"]["level"], log_file=outputs_dir() / "logs" / f"{run_id}.log")
 
-    run = run_pipeline(config, stages=args.stages, run_id=args.run_id)
+    run = run_pipeline(config, stages=args.stages, run_id=run_id)
     print(f"\nrun_id: {run.run_id}")
     print(f"results: {run.results_file}")
     print(f"summarise with: uv run scripts/summarize_run.py {run.run_id}")

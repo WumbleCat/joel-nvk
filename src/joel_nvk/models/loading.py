@@ -61,7 +61,9 @@ def load_base_model(model_id: str, *, device: str = "auto", dtype: str = "auto")
     torch_dtype = resolve_dtype(dtype, device)
     logger.info("Loading %s on %s (%s)", model_id, device, torch_dtype)
 
-    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype)
+    # transformers >=5 renamed torch_dtype to dtype. The annotation keeps mypy off
+    # the decorated `.to`, whose stub expects an unbound PreTrainedModel.
+    model: Any = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch_dtype)
     model.to(device)
     model.eval()
     return model
@@ -86,12 +88,30 @@ def attach_lora(model: Any, lora: Mapping[str, Any], *, adapter_name: str) -> An
     return peft_model
 
 
+def resolve_adapter_dir(path: Path) -> Path:
+    """Find the directory that actually holds ``adapter_config.json``.
+
+    PEFT writes an adapter whose name is not ``default`` into a subdirectory
+    named after it, so ``save_pretrained(out)`` for adapter ``math`` lands at
+    ``out/math/``. Callers keep addressing the directory they asked for; this
+    looks one level down when needed.
+    """
+    if (path / "adapter_config.json").exists():
+        return path
+    candidates = sorted(p.parent for p in path.glob("*/adapter_config.json"))
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise FileNotFoundError(f"No adapter_config.json under {path}")
+    raise FileNotFoundError(f"Several adapters under {path}: {[c.name for c in candidates]}")
+
+
 def load_adapter_for_training(model: Any, path: Path, *, adapter_name: str) -> Any:
     """Reload a saved adapter and keep training it (stage 2 continues stage 1)."""
     from peft import PeftModel
 
     peft_model = PeftModel.from_pretrained(
-        model, str(path), adapter_name=adapter_name, is_trainable=True
+        model, str(resolve_adapter_dir(path)), adapter_name=adapter_name, is_trainable=True
     )
     peft_model.set_adapter(adapter_name)
     return peft_model
@@ -110,9 +130,11 @@ def load_adapters(model: Any, adapters: Mapping[str, Path]) -> Any:
         return model
 
     first_name, first_path = items[0]
-    peft_model = PeftModel.from_pretrained(model, str(first_path), adapter_name=first_name)
+    peft_model = PeftModel.from_pretrained(
+        model, str(resolve_adapter_dir(first_path)), adapter_name=first_name
+    )
     for name, path in items[1:]:
-        peft_model.load_adapter(str(path), adapter_name=name)
+        peft_model.load_adapter(str(resolve_adapter_dir(path)), adapter_name=name)
     peft_model.eval()
     logger.info("Loaded adapters: %s", ", ".join(name for name, _ in items))
     return peft_model
@@ -125,18 +147,25 @@ def adapter_state(model: Any, state: str) -> Iterator[Any]:
     ``state == "base"`` disables every adapter, giving exactly the base model's
     distribution; any other value activates that named adapter.
     """
-    if not hasattr(model, "set_adapter"):
-        if state != BASE_STATE:
-            raise ValueError(f"Model has no adapters; cannot select state {state!r}")
-        yield model
-        return
+    # `disable_adapter` (singular, a context manager) is PeftModel's; transformers
+    # models carry `set_adapter`/`disable_adapters` of their own, so testing for
+    # set_adapter would send a plain base model down the PEFT path.
+    disable_adapter = getattr(model, "disable_adapter", None)
 
     if state == BASE_STATE:
-        with model.disable_adapter():
+        if disable_adapter is None:
+            # No adapters were ever attached: the model already *is* the base.
+            yield model
+            return
+        with disable_adapter():
             yield model
         return
 
-    previous = getattr(model, "active_adapter", None)
+    if disable_adapter is None:
+        raise ValueError(f"Model carries no adapters; cannot select state {state!r}")
+
+    active = getattr(model, "active_adapters", None)
+    previous = active[0] if isinstance(active, (list, tuple)) and active else None
     model.set_adapter(state)
     try:
         yield model

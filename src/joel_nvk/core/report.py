@@ -35,16 +35,19 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
     evaluations: dict[str, dict[str, Any]] = {}
     training: dict[str, dict[str, Any]] = {}
     kl: dict[str, Any] = {}
+    progress: list[dict[str, Any]] = []
 
     for record in records:
-        if "math" in record and "mmlu" in record:
+        if record.get("stage") == "progress":
+            progress.append(record)
+        elif "math" in record and "mmlu" in record:
             evaluations[record["state"]] = record
         elif "train" in record:
             training[record["state"]] = record["train"]
         elif record.get("stage") == "kl":
             kl = record
 
-    return {"evaluations": evaluations, "training": training, "kl": kl}
+    return {"evaluations": evaluations, "training": training, "kl": kl, "progress": progress}
 
 
 def _pct(value: float) -> str:
@@ -114,6 +117,17 @@ def format_summary(run_id: str, summary: dict[str, Any]) -> str:
             old = kl.get("kl_old", {}).get(pair, {})
             new = kl.get("kl_new", {}).get(pair, {})
             lines.append(f"  {pair:<20} {_fmt_kl(old):>18} {_fmt_kl(new):>18}")
+
+    progress = summary.get("progress", [])
+    if progress:
+        lines += ["", "stages (every attempt, in order)"]
+        for item in progress:
+            marker = "ok    " if item.get("status") == "ok" else "FAILED"
+            lines.append(
+                f"  {item.get('timestamp', '')[:19]:<19} {marker} {item['stage_name']:<11}"
+                f" {item.get('duration_s', 0):>7.0f}s"
+                + (f"  {item['error']}" if item.get("error") else "")
+            )
 
     training = summary["training"]
     if training:

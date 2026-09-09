@@ -24,6 +24,8 @@ import logging
 import platform
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -430,7 +432,7 @@ def run_pipeline(
     datasets = build_datasets(config, seed)
     hashes = freeze_datasets(datasets)
 
-    if "prepare" in selected:
+    def prepare() -> None:
         write_manifest(run, hashes)
         run.record(
             "prepare",
@@ -440,49 +442,69 @@ def run_pipeline(
             },
         )
 
-    if "baseline" in selected:
-        evaluate_state(run, "baseline", BASE_STATE, datasets, adapters={})
-
-    if "train_math" in selected:
-        stage_train(
+    actions: dict[str, Callable[[], Any]] = {
+        "prepare": prepare,
+        "baseline": lambda: evaluate_state(run, "baseline", BASE_STATE, datasets, adapters={}),
+        "train_math": lambda: stage_train(
             run,
             "train_math",
             datasets["math_train"],
             train_key="math",
             from_adapter=None,
             to_state=MATH_STATE,
-        )
-
-    if "eval_math" in selected:
-        evaluate_state(
+        ),
+        "eval_math": lambda: evaluate_state(
             run,
             "eval_math",
             MATH_STATE,
             datasets,
             adapters={MATH_STATE: run.adapter_path(MATH_STATE)},
-        )
-
-    if "train_mmlu" in selected:
-        stage_train(
+        ),
+        "train_mmlu": lambda: stage_train(
             run,
             "train_mmlu",
             datasets["mmlu_train"],
             train_key="mmlu",
             from_adapter=run.adapter_path(MATH_STATE),
             to_state=MMLU_STATE,
-        )
-
-    if "eval_mmlu" in selected:
-        evaluate_state(
+        ),
+        "eval_mmlu": lambda: evaluate_state(
             run,
             "eval_mmlu",
             MMLU_STATE,
             datasets,
             adapters={MMLU_STATE: run.adapter_path(MMLU_STATE)},
-        )
+        ),
+        "kl": lambda: stage_kl(run, datasets),
+    }
 
-    if "kl" in selected:
-        stage_kl(run, datasets)
+    # Stage boundaries and durations go to the log and to a progress record, so
+    # a run can be checked on while it is going and reconstructed afterwards.
+    for position, stage in enumerate(selected, start=1):
+        logger.info("==== stage %d/%d: %s — started", position, len(selected), stage)
+        started = time.monotonic()
+        try:
+            actions[stage]()
+        except Exception as exc:
+            duration = time.monotonic() - started
+            run.record(
+                "progress",
+                {
+                    "stage_name": stage,
+                    "status": "failed",
+                    "duration_s": round(duration, 1),
+                    "error": repr(exc),
+                },
+            )
+            logger.error("==== stage %s FAILED after %.0fs: %r", stage, duration, exc)
+            raise
+        duration = time.monotonic() - started
+        run.record(
+            "progress", {"stage_name": stage, "status": "ok", "duration_s": round(duration, 1)}
+        )
+        logger.info(
+            "==== stage %d/%d: %s — done in %.0fs", position, len(selected), stage, duration
+        )
 
     logger.info("Results -> %s", run.results_file)
     return run
