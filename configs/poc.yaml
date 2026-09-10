@@ -67,9 +67,13 @@ train:
     epochs: 2
     max_steps: -1
     lr: 2.0e-4
-    batch_size: 8
-    grad_accum: 2
-    max_length: 512
+    # The GPU is shared with desktop apps holding 1-3 GB of its 6 GB: the first
+    # attempt (8 x 2, 512 tokens) hit CUDA OOM at step 250/376. Same effective
+    # batch of 16, a quarter of the activation memory.
+    batch_size: 4
+    grad_accum: 4
+    max_length: 384           # CSQA prompts are ~80 tokens; the target is one letter
+    save_every: 50            # adapter snapshots, so a crash resumes instead of restarting
     scheduler: cosine
     warmup_ratio: 0.03
     weight_decay: 0.0
@@ -80,8 +84,8 @@ train:
     epochs: 2
     max_steps: -1
     lr: 1.0e-4
-    batch_size: 4
-    grad_accum: 4
+    batch_size: 2             # GSM8K targets are long; see the note on train.old
+    grad_accum: 8
     max_length: 640
     scheduler: cosine
     warmup_ratio: 0.03

@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -399,25 +400,69 @@ def stage_prepare(run: PocRun) -> dict[str, Any]:
 
 def stage_train_old(run: PocRun) -> dict[str, Any]:
     """M0 -> M1: LoRA on Task A, merged into the weights and saved as a full model."""
-    from joel_nvk.models.loading import attach_lora, merge_and_save
+    from joel_nvk.models.loading import attach_lora, load_adapter_for_training, merge_and_save
     from joel_nvk.models.train import train_lora
 
     sets = frozen_sets(run)
     model, tokenizer = _load(_base_model_id(run), run, padding_side="right")
-    model = attach_lora(model, run.config["lora"], adapter_name="old_task")
+    train_cfg, offset, resume_from = _resume_plan(
+        run.config["train"]["old"], run.old_adapter_dir, len(sets["a_train"])
+    )
+    if resume_from is None:
+        model = attach_lora(model, run.config["lora"], adapter_name="old_task")
+    else:
+        model = load_adapter_for_training(model, resume_from, adapter_name="old_task")
     summary = train_lora(
         model,
         tokenizer,
         sets["a_train"],
-        train_cfg=run.config["train"]["old"],
+        train_cfg=train_cfg,
         output_dir=run.old_adapter_dir,
         seed=run.seed,
         run_name=f"{run.run_id}-old",
+        step_offset=offset,
     )
     merge_and_save(model, tokenizer, run.m1_dir)
     _release(model)
+    summary["resumed_from_step"] = offset
     run.write_json("models/train_old.json", summary)
     return summary
+
+
+def _latest_snapshot(adapter_dir: Path) -> tuple[int, Path] | None:
+    steps = []
+    for p in adapter_dir.glob("step-*"):
+        if not p.is_dir():
+            continue
+        has_adapter = (p / "adapter_config.json").exists() or any(p.glob("*/adapter_config.json"))
+        if has_adapter:
+            steps.append((int(p.name.split("-", 1)[1]), p))
+    steps.sort()
+    return steps[-1] if steps else None
+
+
+def _resume_plan(
+    train_cfg: Mapping[str, Any], adapter_dir: Path, n_examples: int
+) -> tuple[dict[str, Any], int, Path | None]:
+    """Continue from the latest snapshot if one exists.
+
+    Returns ``(train_cfg, step_offset, adapter_path)``. On resume the remaining
+    steps run with a fresh optimiser and no warmup — a schedule discontinuity
+    that is recorded (``resumed_from_step``) rather than hidden. It is the price
+    of not losing half an hour of a shared 6 GB GPU to one CUDA OOM.
+    """
+    from joel_nvk.models.train import planned_steps
+
+    latest = _latest_snapshot(adapter_dir)
+    total = planned_steps(train_cfg, n_examples)
+    if latest is None or latest[0] >= total:
+        return dict(train_cfg), 0, None
+    done, path = latest
+    resumed = dict(train_cfg)
+    resumed["max_steps"] = total - done
+    resumed["warmup_ratio"] = 0.0
+    logger.warning("Resuming from step %d/%d (%s)", done, total, path)
+    return resumed, done, path
 
 
 def _eval_sets(
@@ -516,7 +561,7 @@ def _require_valid(run: PocRun) -> None:
 
 def stage_train_new(run: PocRun, arm: str) -> dict[str, Any]:
     """M1 -> M2 for one arm, snapshotting the adapter at ``save_steps``."""
-    from joel_nvk.models.loading import attach_lora
+    from joel_nvk.models.loading import attach_lora, load_adapter_for_training
     from joel_nvk.models.train import train_lora
 
     _require_valid(run)
@@ -536,7 +581,11 @@ def stage_train_new(run: PocRun, arm: str) -> dict[str, Any]:
         raise ValueError(f"Unknown arm {arm!r}; known: {ARMS}")
 
     model, tokenizer = _load(str(run.m1_dir), run, padding_side="right")
-    model = attach_lora(model, run.config["lora"], adapter_name="new_task")
+    train_cfg, offset, resume_from = _resume_plan(train_cfg, arm_dir, len(data))
+    if resume_from is None:
+        model = attach_lora(model, run.config["lora"], adapter_name="new_task")
+    else:
+        model = load_adapter_for_training(model, resume_from, adapter_name="new_task")
     summary = train_lora(
         model,
         tokenizer,
@@ -546,10 +595,12 @@ def stage_train_new(run: PocRun, arm: str) -> dict[str, Any]:
         seed=run.seed,
         run_name=f"{run.run_id}-{arm}",
         save_steps=save_steps,
+        step_offset=offset,
     )
     _release(model)
     summary["arm"] = arm
     summary["data_size"] = len(data)
+    summary["resumed_from_step"] = offset
     run.write_json(f"arms/{arm}/train.json", summary)
     return summary
 

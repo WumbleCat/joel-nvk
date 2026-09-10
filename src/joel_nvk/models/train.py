@@ -33,12 +33,29 @@ def _warmup_steps(
     """
     if ratio <= 0:
         return 0
-    if max_steps > 0:
-        total = max_steps
-    else:
-        per_epoch = math.ceil(n_examples / max(batch_size * grad_accum, 1))
-        total = math.ceil(per_epoch * epochs)
+    total = _total_steps(n_examples, batch_size, grad_accum, epochs, max_steps)
     return max(int(round(ratio * total)), 0)
+
+
+def _total_steps(
+    n_examples: int, batch_size: int, grad_accum: int, epochs: float, max_steps: int
+) -> int:
+    if max_steps > 0:
+        return max_steps
+    per_epoch = math.ceil(n_examples / max(batch_size * grad_accum, 1))
+    return math.ceil(per_epoch * epochs)
+
+
+def planned_steps(train_cfg: Mapping[str, Any], n_examples: int) -> int:
+    """How many optimiser steps a config will run over ``n_examples`` — what a
+    resume needs in order to know how many are left."""
+    return _total_steps(
+        n_examples,
+        int(train_cfg["batch_size"]),
+        int(train_cfg.get("grad_accum", 1)),
+        float(train_cfg.get("epochs", 1)),
+        int(train_cfg.get("max_steps", -1)),
+    )
 
 
 def train_lora(
@@ -51,14 +68,19 @@ def train_lora(
     seed: int,
     run_name: str,
     save_steps: list[int] | None = None,
+    step_offset: int = 0,
 ) -> dict[str, Any]:
     """Fine-tune the active LoRA adapter and save it to ``output_dir``.
 
     Args:
-        save_steps: Optimiser steps at which to snapshot the adapter into
+        save_steps: Global optimiser steps at which to snapshot the adapter into
             ``output_dir / "step-<n>"``. The final adapter is always saved to
             ``output_dir`` itself and, when ``save_steps`` is given, also as
             ``step-<final>`` so the checkpoint ladder is complete.
+            ``train_cfg["save_every"]`` adds a periodic snapshot on top, so a
+            crashed run can resume from the last one instead of restarting.
+        step_offset: Global step this call starts from when resuming; local
+            Trainer steps are shifted by it so snapshot names stay global.
 
     Returns the training summary (steps, final loss, dataset size, loss curve)
     for the run record. The model is left in eval mode.
@@ -67,14 +89,17 @@ def train_lora(
     from transformers import Trainer, TrainerCallback, TrainingArguments
 
     wanted_steps = set(save_steps or [])
+    save_every = int(train_cfg.get("save_every", 0) or 0)
     loss_curve: list[dict[str, float]] = []
 
     class _SaveAtSteps(TrainerCallback):
-        """Snapshot the adapter at the requested optimiser steps."""
+        """Snapshot the adapter at the requested (global) optimiser steps."""
 
         def on_step_end(self, args, state, control, model=None, **kwargs):  # type: ignore[override]
-            if state.global_step in wanted_steps:
-                target = output_dir / f"step-{state.global_step}"
+            step = state.global_step + step_offset
+            periodic = save_every and step % save_every == 0
+            if step in wanted_steps or periodic:
+                target = output_dir / f"step-{step}"
                 target.mkdir(parents=True, exist_ok=True)
                 model.save_pretrained(str(target))
                 logger.info("checkpoint -> %s", target)
@@ -167,9 +192,9 @@ def train_lora(
     output_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
-    final_step = int(result.global_step)
-    if save_steps is not None and final_step not in wanted_steps:
-        final_dir = output_dir / f"step-{final_step}"
+    final_step = int(result.global_step) + step_offset
+    final_dir = output_dir / f"step-{final_step}"
+    if not final_dir.exists():
         final_dir.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(final_dir))
     logger.info("Saved adapter to %s", output_dir)
