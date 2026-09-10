@@ -51,9 +51,24 @@ uv run scripts/summarize_run.py --latest          # accuracy / forgetting / KL t
 From PowerShell, with a switch per stage:
 
 ```powershell
-.\scripts
-un_pipeline.ps1 -All -LowMemory -Summarize
+.\scripts\run_pipeline.ps1 -All -LowMemory -Summarize
 ```
+
+## Proof-of-concept experiment (M0 → M1 → M2)
+
+The experiment for the Saturday review — design in [POC_DESIGN.md](POC_DESIGN.md),
+results in [RESULTS.md](RESULTS.md), the short version in
+[SATURDAY_SUMMARY.md](SATURDAY_SUMMARY.md):
+
+```bash
+uv run scripts/run_poc.py --config configs/poc.yaml --low-memory   # everything, one process per stage
+uv run scripts/probe_tasks.py --env poc                            # just the M0 probe
+uv run scripts/run_poc.py --env poc --run-id <id> --stages eval_ckpts aggregate --arms sft
+```
+
+Stages: `probe → prepare → train_old → eval_m0_m1 → build_self → train_new → eval_ckpts → aggregate`,
+each resumable with `--run-id`. Outputs land in `outputs/poc/<run_id>/`
+(`checkpoints.csv`, `predictions/`, `kl/`, `configs/`, `figures/`, `RESULTS.md`).
 
 ## Repository structure
 
