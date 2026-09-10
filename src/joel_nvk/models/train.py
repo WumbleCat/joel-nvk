@@ -50,14 +50,34 @@ def train_lora(
     output_dir: Path,
     seed: int,
     run_name: str,
+    save_steps: list[int] | None = None,
 ) -> dict[str, Any]:
     """Fine-tune the active LoRA adapter and save it to ``output_dir``.
 
-    Returns the training summary (steps, final loss, dataset size) for the run
-    record. The model is left in eval mode.
+    Args:
+        save_steps: Optimiser steps at which to snapshot the adapter into
+            ``output_dir / "step-<n>"``. The final adapter is always saved to
+            ``output_dir`` itself and, when ``save_steps`` is given, also as
+            ``step-<final>`` so the checkpoint ladder is complete.
+
+    Returns the training summary (steps, final loss, dataset size, loss curve)
+    for the run record. The model is left in eval mode.
     """
     import torch
     from transformers import Trainer, TrainerCallback, TrainingArguments
+
+    wanted_steps = set(save_steps or [])
+    loss_curve: list[dict[str, float]] = []
+
+    class _SaveAtSteps(TrainerCallback):
+        """Snapshot the adapter at the requested optimiser steps."""
+
+        def on_step_end(self, args, state, control, model=None, **kwargs):  # type: ignore[override]
+            if state.global_step in wanted_steps:
+                target = output_dir / f"step-{state.global_step}"
+                target.mkdir(parents=True, exist_ok=True)
+                model.save_pretrained(str(target))
+                logger.info("checkpoint -> %s", target)
 
     class _LogToFile(TrainerCallback):
         """Forward the Trainer's loss/lr lines to ``logging``.
@@ -70,6 +90,14 @@ def train_lora(
         def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
             if not logs:
                 return
+            if "loss" in logs:
+                loss_curve.append(
+                    {
+                        "step": int(state.global_step),
+                        "loss": float(logs["loss"]),
+                        "lr": float(logs.get("learning_rate", 0.0)),
+                    }
+                )
             fields = ", ".join(
                 f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in logs.items()
             )
@@ -115,13 +143,21 @@ def train_lora(
         bf16=use_bf16,
         run_name=run_name,
         disable_tqdm=False,
+        # Recomputes activations in the backward pass; what lets a 1.5B model
+        # train with LoRA inside 6 GB of VRAM.
+        gradient_checkpointing=bool(train_cfg.get("gradient_checkpointing", False)),
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
+    if args.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
+        # With frozen embeddings the checkpointed inputs carry no grad; PEFT
+        # needs this hook so the LoRA layers still receive one.
+        model.enable_input_require_grads()
 
     model.train()
     trainer = Trainer(
         model=model,
         args=args,
-        callbacks=[_LogToFile()],
+        callbacks=[_LogToFile(), _SaveAtSteps()],
         train_dataset=encoded,
         data_collator=make_collator(tokenizer),
     )
@@ -131,14 +167,24 @@ def train_lora(
     output_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
+    final_step = int(result.global_step)
+    if save_steps is not None and final_step not in wanted_steps:
+        final_dir = output_dir / f"step-{final_step}"
+        final_dir.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(final_dir))
     logger.info("Saved adapter to %s", output_dir)
 
     return {
         "n_examples": len(encoded),
-        "steps": int(result.global_step),
+        "steps": final_step,
         "train_loss": float(result.training_loss),
         "epochs": float(train_cfg.get("epochs", 1)),
         "lr": float(train_cfg["lr"]),
         "warmup_steps": warmup_steps,
+        "batch_size": batch_size,
+        "grad_accum": grad_accum,
+        "effective_batch": batch_size * grad_accum,
+        "saved_steps": sorted(wanted_steps | {final_step}) if save_steps is not None else [],
+        "loss_curve": loss_curve,
         "adapter_path": str(output_dir),
     }
