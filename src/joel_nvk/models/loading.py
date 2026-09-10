@@ -92,6 +92,23 @@ def attach_lora(model: Any, lora: Mapping[str, Any], *, adapter_name: str) -> An
     return peft_model
 
 
+def merge_and_save(peft_model: Any, tokenizer: Any, target: Path) -> Path:
+    """Fold the active adapter into the weights and save a plain model.
+
+    This is how the old-task-adapted checkpoint M1 becomes a *base* for stage C:
+    new-task adapters then attach on top of it, and disabling them recovers M1
+    exactly, which is what the KL reference needs. Merging happens in the
+    model's compute dtype (bf16 on GPU), so the merged weights carry that
+    rounding; it is the same rounding every stage-C arm inherits.
+    """
+    merged = peft_model.merge_and_unload()
+    target.mkdir(parents=True, exist_ok=True)
+    merged.save_pretrained(str(target), safe_serialization=True)
+    tokenizer.save_pretrained(str(target))
+    logger.info("Merged model -> %s", target)
+    return target
+
+
 def resolve_adapter_dir(path: Path) -> Path:
     """Find the directory that actually holds ``adapter_config.json``.
 

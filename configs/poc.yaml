@@ -1,0 +1,91 @@
+# Proof-of-concept: M0 -> M1 (old task, LoRA) -> M2 checkpoints (new task).
+# Sized for one RTX 3060 (6 GB): 1.5B model in bf16 with LoRA and gradient
+# checkpointing. Every number here is recorded in the run's configs/ directory.
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+poc:
+  # Pair chosen after the M0 probe (POC_DESIGN.md, decision D4/D10): CommonsenseQA
+  # starts lower than ARC-C (69% vs 75%) and has 9x the training data, so the
+  # stage-B gain the validity gate demands is the more likely. ARC-C becomes a
+  # second control: an untrained MC capability to compare against the trained one.
+  task_a: commonsense_qa
+  task_a_train_extra: []
+  task_b: gsm8k
+  controls: [mmlu, arc_challenge]     # evaluated at M0/M1 and the final checkpoint only
+
+  probe:
+    tasks: [arc_challenge, commonsense_qa, winogrande, hellaswag, mmlu, gsm8k, math]
+    size: 100
+    failure_examples: 10
+
+  sizes:
+    a_train: 3000
+    a_eval: 300
+    b_train: 2000
+    b_eval: 200               # GSM8K at 512 tokens is the expensive evaluation
+    control_eval: 200
+
+  validity:
+    # Stage B must lift Task A by at least this much (absolute) or the run is
+    # flagged invalid and stage C does not start.
+    min_old_task_gain: 0.03
+
+  arms: [sft, self_sft]               # iter_sft is opt-in: add it here
+  seeds: [42]
+
+  # Optimiser steps at which stage-C adapters are snapshotted. With b_train=2000
+  # and an effective batch of 16, one epoch is 125 steps; two epochs = 250.
+  save_steps: [10, 25, 50, 100, 175, 250]
+
+  self_sft:
+    samples_per_prompt: 4
+    temperature: 0.7
+    keep_per_prompt: 1
+    generate_batch_size: 16
+
+  iter_sft:
+    rounds: 2
+
+  kl:
+    probe_size: 64            # prompts per axis
+    max_new_tokens: 160       # M1-generated continuation scored under every checkpoint
+    generate_batch_size: 8
+    batch_size: 1
+
+  eval:
+    batch_size: 16
+
+train:
+  old:                        # stage B: M0 -> M1 on Task A
+    epochs: 2
+    max_steps: -1
+    lr: 2.0e-4
+    batch_size: 8
+    grad_accum: 2
+    max_length: 512
+    scheduler: cosine
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 5
+    gradient_checkpointing: true
+  new:                        # stage C: M1 -> M2 on Task B (all arms share this)
+    epochs: 2
+    max_steps: -1
+    lr: 1.0e-4
+    batch_size: 4
+    grad_accum: 4
+    max_length: 640
+    scheduler: cosine
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 5
+    gradient_checkpointing: true

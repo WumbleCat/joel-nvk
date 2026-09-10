@@ -1,0 +1,44 @@
+# Does the PoC pipeline execute end to end? Tiny sizes, small model. The numbers
+# it produces mean nothing; the stage table and the files it leaves behind do.
+
+model:
+  id: Qwen/Qwen2.5-0.5B-Instruct
+
+poc:
+  probe:
+    tasks: [arc_challenge, gsm8k]
+    size: 6
+    failure_examples: 3
+  sizes:
+    a_train: 16
+    a_eval: 8
+    b_train: 16
+    b_eval: 8
+    control_eval: 6
+  validity:
+    min_old_task_gain: -1.0          # never block the smoke run
+  arms: [sft, self_sft]
+  save_steps: [2, 4]
+  self_sft:
+    samples_per_prompt: 2
+    generate_batch_size: 4
+  iter_sft:
+    rounds: 2
+  kl:
+    probe_size: 4
+    max_new_tokens: 32
+    generate_batch_size: 4
+  eval:
+    batch_size: 4
+
+train:
+  old:
+    max_steps: 4
+    batch_size: 2
+    grad_accum: 1
+    max_length: 384
+  new:
+    max_steps: 4
+    batch_size: 2
+    grad_accum: 1
+    max_length: 384
