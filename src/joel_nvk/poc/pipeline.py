@@ -263,21 +263,41 @@ def frozen_sets(run: PocRun) -> dict[str, list[Example]]:
 def stage_probe(run: PocRun) -> dict[str, Any]:
     """M0 on each candidate task: accuracy, parse failures, headroom, failure examples."""
     cfg = _cfg(run)["probe"]
-    model, tokenizer = _load(_base_model_id(run), run, padding_side="left")
-    report: dict[str, Any] = {}
+    # Resumable: a task whose predictions are already on disk is not re-run, and
+    # the report is rewritten after every task so a kill loses at most one.
+    report_path = run.root / "probe" / "probe.json"
+    report: dict[str, Any] = (
+        json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    )
+    model = tokenizer = None
     for name in cfg["tasks"]:
         task = get_task(name)
-        examples = task.load(
-            task.eval_split, size=int(cfg["size"]), seed=derive_seed(run.seed, f"probe_{name}")
-        )
-        result = evaluate_task(
-            model, tokenizer, task, examples, batch_size=int(_cfg(run)["eval"]["batch_size"])
-        )
-        failures = [p for p in result["predictions"] if not p["correct"]][
+        if name in report:
+            continue
+        predictions_path = run.root / "predictions" / f"probe_{name}.jsonl"
+        if predictions_path.exists():
+            predictions = run.read_predictions(f"probe_{name}")
+            result = _result_from_predictions(task, predictions)
+            n_choices = None
+        else:
+            if model is None:
+                model, tokenizer = _load(_base_model_id(run), run, padding_side="left")
+            examples = task.load(
+                task.eval_split, size=int(cfg["size"]), seed=derive_seed(run.seed, f"probe_{name}")
+            )
+            result = evaluate_task(
+                model, tokenizer, task, examples, batch_size=int(_cfg(run)["eval"]["batch_size"])
+            )
+            predictions = result.pop("predictions")
+            run.write_predictions(f"probe_{name}", predictions)
+            n_choices = examples[0].meta.get("n_choices")
+        failures = [p for p in predictions if not p["correct"]][
             : int(cfg.get("failure_examples", 10))
         ]
-        run.write_predictions(f"probe_{name}", result.pop("predictions"))
-        chance = 1.0 / examples[0].meta.get("n_choices", 1) if task.kind == "mc" else 0.0
+        if task.kind == "mc":
+            chance = 1.0 / (n_choices or _n_choices_from_prompt(predictions))
+        else:
+            chance = 0.0
         report[name] = {
             **result,
             "capability": task.capability,
@@ -296,10 +316,39 @@ def stage_probe(run: PocRun) -> dict[str, Any]:
                 for f in failures
             ],
         }
-    _release(model)
-    run.write_json("probe/probe.json", report)
-    (run.root / "probe" / "probe.md").write_text(probe_markdown(report), encoding="utf-8")
+        run.write_json("probe/probe.json", report)
+        (run.root / "probe" / "probe.md").write_text(probe_markdown(report), encoding="utf-8")
+    if model is not None:
+        _release(model)
     return report
+
+
+def _result_from_predictions(task: Task, predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rebuild a task result from stored predictions (older files lack some fields)."""
+    n = len(predictions)
+    budget = task.max_new_tokens
+    return {
+        "task": task.name,
+        "n": n,
+        "accuracy": sum(p["correct"] for p in predictions) / n if n else 0.0,
+        "parse_failure_rate": sum(p["predicted"] is None for p in predictions) / n if n else 0.0,
+        "format_failure_rate": sum(
+            not p.get("format_ok", p["predicted"] is not None) for p in predictions
+        )
+        / n
+        if n
+        else 0.0,
+        "truncation_rate": sum(p.get("truncated", p["n_tokens"] >= budget) for p in predictions) / n
+        if n
+        else 0.0,
+        "mean_completion_len": sum(p["n_tokens"] for p in predictions) / n if n else 0.0,
+    }
+
+
+def _n_choices_from_prompt(predictions: list[dict[str, Any]]) -> int:
+    """Gold letters bound the option count when the example metadata is gone."""
+    letters = {str(p["gold"]) for p in predictions if p.get("gold")}
+    return max(4, len(letters))
 
 
 def probe_markdown(report: dict[str, Any]) -> str:
