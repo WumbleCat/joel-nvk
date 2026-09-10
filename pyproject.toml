@@ -25,6 +25,7 @@ ml = [
     "accelerate>=0.34",
     "safetensors>=0.4",
     "truststore>=0.10.4",
+    "matplotlib>=3.10.9",
 ]
 
 # Installed by `uv sync` (the default group). Skip with `uv sync --no-dev`.
